@@ -11,7 +11,6 @@ import MetalKit
 
 // Our macOS specific view controller
 class GameViewController: NSViewController {
-
     var renderer: Renderer!
     var mtkView: MTKView!
 
@@ -41,5 +40,10 @@ class GameViewController: NSViewController {
         renderer.mtkView(mtkView, drawableSizeWillChange: mtkView.drawableSize)
 
         mtkView.delegate = renderer
+    }
+    
+    override func viewDidAppear() {
+        super.viewDidAppear()
+//        view.window?.toggleFullScreen(self)
     }
 }
