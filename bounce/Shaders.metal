@@ -1,20 +1,10 @@
-//
-//  Shaders.metal
-//  bounce
-//
-//  Created by Edward Swernofsky on 11/26/19.
-//  Copyright © 2019 Edward Swernofsky. All rights reserved.
-//
-
-// File for Metal kernel and shader functions
-
 #include <metal_stdlib>
 #include <simd/simd.h>
-
-// Including header shared between this Metal shader code and Swift/C code executing Metal API commands
-// #import "ShaderTypes.h"
+#import "Constants.h"
 
 using namespace metal;
+
+constant float2 renderMax = float2(width, height);
 
 struct Ball {
     float2 pos;
@@ -31,26 +21,30 @@ bool isBounded(float x, float max) {
     return 0 <= x && x < max;
 }
 
+float2 renderPos(float2 pos) {
+    return 2 * (pos+ballRad) / renderMax - 1;
+}
+
 kernel void moveBalls(device Ball* balls,
                       uint i [[ thread_position_in_grid ]]) {
     balls[i].pos += balls[i].vel;
     
-    if (!isBounded(balls[i].pos.x, 800)) {
+    if (!isBounded(balls[i].pos.x, maxX)) {
         balls[i].vel.x *= -1;
     }
     
-    if (!isBounded(balls[i].pos.y, 600)) {
+    if (!isBounded(balls[i].pos.y, maxY)) {
         balls[i].vel.y *= -1;
     }
 }
 
-vertex VertexOut vertexShader(const device float2* vertices,
+vertex VertexOut vertexShader(const device Ball* balls,
                               const device float4* colors,
                               uint i [[ vertex_id ]]) {
     VertexOut out;
-    out.position = float4(vertices[i], 0, 1);
+    out.position = float4(renderPos(balls[i].pos), 0, 1);
     out.color = colors[i];
-    out.point_size = 8;
+    out.point_size = ballDiam;
     return out;
 }
 

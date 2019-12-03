@@ -44,6 +44,6 @@ class GameViewController: NSViewController {
     
     override func viewDidAppear() {
         super.viewDidAppear()
-//        view.window?.toggleFullScreen(self)
+        view.window?.toggleFullScreen(self)
     }
 }

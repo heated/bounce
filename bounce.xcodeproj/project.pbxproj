@@ -21,7 +21,7 @@
 		2B6769A2238DC8EE000DAB5B /* GameViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameViewController.swift; sourceTree = "<group>"; };
 		2B6769A4238DC8EE000DAB5B /* Renderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Renderer.swift; sourceTree = "<group>"; };
 		2B6769A6238DC8EE000DAB5B /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
-		2B6769A8238DC8EE000DAB5B /* ShaderTypes.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ShaderTypes.h; sourceTree = "<group>"; };
+		2B6769A8238DC8EE000DAB5B /* Constants.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Constants.h; sourceTree = "<group>"; };
 		2B6769A9238DC8F3000DAB5B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		2B6769AC238DC8F3000DAB5B /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
 		2B6769AE238DC8F3000DAB5B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -62,7 +62,7 @@
 				2B6769A2238DC8EE000DAB5B /* GameViewController.swift */,
 				2B6769A4238DC8EE000DAB5B /* Renderer.swift */,
 				2B6769A6238DC8EE000DAB5B /* Shaders.metal */,
-				2B6769A8238DC8EE000DAB5B /* ShaderTypes.h */,
+				2B6769A8238DC8EE000DAB5B /* Constants.h */,
 				2B6769A9238DC8F3000DAB5B /* Assets.xcassets */,
 				2B6769AB238DC8F3000DAB5B /* Main.storyboard */,
 				2B6769AE238DC8F3000DAB5B /* Info.plist */,
@@ -289,7 +289,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = faster.bounce;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_OBJC_BRIDGING_HEADER = "$(TARGET_NAME)/ShaderTypes.h";
+				SWIFT_OBJC_BRIDGING_HEADER = "$(TARGET_NAME)/Constants.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -308,7 +308,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = faster.bounce;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_OBJC_BRIDGING_HEADER = "$(TARGET_NAME)/ShaderTypes.h";
+				SWIFT_OBJC_BRIDGING_HEADER = "$(TARGET_NAME)/Constants.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;

@@ -2,22 +2,23 @@ import Metal
 import MetalKit
 import simd
 
-typealias Position = SIMD2<Float>
 typealias Color = SIMD4<Float>
 
-let width: Float = 800
-let height: Float = 600
-let ballC = 2_000
-let ballDiam: Float = 8
-let ballRad = ballDiam / 2
 let maxX = width - ballDiam
 let maxY = height - ballDiam
-let ballSpeed: Float = 2
-let maxBuffersInFlight = 3
-let dataUnit = MemoryLayout<Position>.stride
-let dataSize = ballC * dataUnit
+let ballSpeed: Float = 0.03
 
-// TODO: Put balls on GPU; use compute shaders
+let targetBallC = 100_000
+let apxAreaPerBall = maxX * maxY / Float(targetBallC)
+let apxLengthPerBall = sqrt(apxAreaPerBall)
+let xBalls = Int(maxX / apxLengthPerBall)
+let yBalls = Int(maxY / apxLengthPerBall)
+let ballC = xBalls * yBalls
+
+let maxBuffersInFlight = 3
+let ceil = Int((ballC - 1)/256 + 1)
+let gridSize = MTLSizeMake(ceil, 1, 1)
+let threadGroupSize = MTLSizeMake(256, 1, 1)
 
 struct Ball {
     var x, y, dx, dy: Float
@@ -34,8 +35,9 @@ class Renderer: NSObject, MTKViewDelegate {
     public let device: MTLDevice
     let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
     let commandQueue: MTLCommandQueue
+    let moveState: MTLComputePipelineState
     var drawState: MTLRenderPipelineState
-    var vertexBuffer: MTLBuffer
+    var ballBuffer: MTLBuffer
     var colorBuffer: MTLBuffer
     var ballTexture: MTLTexture
     var balls: [Ball] = []
@@ -45,41 +47,29 @@ class Renderer: NSObject, MTKViewDelegate {
         self.commandQueue = self.device.makeCommandQueue()!
         
         let library = device.makeDefaultLibrary()!
+        let moveBalls = library.makeFunction(name: "moveBalls")!
         let vertexFunction = library.makeFunction(name: "vertexShader")
         let fragmentFunction = library.makeFunction(name: "fragmentShader")
         
-        do {
-            ballTexture = try Renderer.loadTexture(device: device, textureName: "Circle")
-        } catch {
-            print("Unable to load texture. Error info: \(error)")
-            return nil
-        }
+        ballTexture = try! Renderer.loadTexture(device: device, textureName: "Circle")
         
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
         pipelineDescriptor.vertexFunction = vertexFunction
         pipelineDescriptor.fragmentFunction = fragmentFunction
         let attachment = pipelineDescriptor.colorAttachments[0]!
         attachment.pixelFormat = metalKitView.colorPixelFormat
-        attachment.isBlendingEnabled = true
-        attachment.rgbBlendOperation = .add
-        attachment.alphaBlendOperation = .add
-        attachment.sourceRGBBlendFactor = .one
-        attachment.sourceAlphaBlendFactor = .sourceAlpha
-        attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
-        attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        Renderer.setAlphaBlendSettings(attachment)
         
+        moveState = try! device.makeComputePipelineState(function: moveBalls)
         drawState = try! device.makeRenderPipelineState(descriptor: pipelineDescriptor)
-        vertexBuffer = device.makeBuffer(length: dataSize)!
-        let colors = (0..<ballC).map { _ -> Color in
-            var color = Color.random(in: 0..<1)
-            color.w = 1
-            return color
-        }
-        colorBuffer = device.makeBuffer(bytes: colors, length: ballC * MemoryLayout<Color>.stride)!
         
+        colorBuffer = Renderer.makeColorBuffer(device)
+        ballBuffer = Renderer.makeBallBuffer(device)
         super.init()
-        randomizeBalls()
-        copyToVertexBuffer()
+        
+        for _ in 0..<40 {
+            updateBallsLoop()
+        }
     }
     
     class func loadTexture(device: MTLDevice,
@@ -96,62 +86,62 @@ class Renderer: NSObject, MTKViewDelegate {
                                             bundle: nil,
                                             options: textureLoaderOptions)
     }
+    
+    class func setAlphaBlendSettings(_ attachment: MTLRenderPipelineColorAttachmentDescriptor) {
+        attachment.isBlendingEnabled = true
+        attachment.rgbBlendOperation = .add
+        attachment.alphaBlendOperation = .add
+        attachment.sourceRGBBlendFactor = .one
+        attachment.sourceAlphaBlendFactor = .sourceAlpha
+        attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+        attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+    }
 
-    func randomizeBalls() {
-        for _ in 0..<ballC {
-            var newX, newY: Float
+    class func randomBalls() -> [Ball] {
+        let areaPerBall = maxX * maxY / Float(ballC)
+        let lengthPerBall = sqrt(areaPerBall)
+        
+        assert(lengthPerBall > ballDiam)
+        let offset = (lengthPerBall - ballDiam) / 2
+        var balls: [Ball] = []
+        
+        for i in 0..<ballC {
+            let x = Float(i % xBalls) * lengthPerBall + offset
+            let y = Float(i / xBalls) * lengthPerBall + offset
             
-            repeat {
-                newX = Float.random(in: 0..<maxX)
-                newY = Float.random(in: 0..<maxY)
-            } while balls.contains { ball in
-                let dx = ball.x - newX
-                let dy = ball.y - newY
-                return pow(dx, 2) + pow(dy, 2) < pow(ballDiam, 2)
-            }
-            
-            let ball = Ball(x: newX, y: newY)
+            let ball = Ball(x: x, y: y)
             balls.append(ball)
         }
-    }
-    
-    func addVerticesForPos(x: Float, y: Float) {
         
+        return balls
     }
     
-    func toCoord(_ x: Float, _ max: Float) -> Float {
-        return 2*(x+ballRad)/max - 1
-    }
-    
-    func isBounded(_ x: Float, _ max: Float) -> Bool {
-        return 0 <= x && x < max
-    }
-    
-    func copyToVertexBuffer() {
-        let contents = vertexBuffer.contents()
-        for i in 0..<ballC {
-            let pos = Position(
-                toCoord(balls[i].x, width),
-                toCoord(balls[i].y, height))
-            
-            contents.storeBytes(of: pos,
-                                toByteOffset: i * dataUnit,
-                                as: Position.self);
+    class func makeColorBuffer(_ device: MTLDevice) -> MTLBuffer {
+        let colors = (0..<ballC).map { _ -> Color in
+            var color = Color.random(in: 0..<1)
+            color.w = 1
+            return color
         }
+        return device.makeBuffer(bytes: colors, length: ballC * MemoryLayout<Color>.stride)!
     }
     
-    func updateGameState() {
-        for i in 0..<ballC {
-            balls[i].x += balls[i].dx
-            balls[i].y += balls[i].dy
-            if !isBounded(balls[i].x, maxX) {
-                balls[i].dx *= -1
-            }
-            if !isBounded(balls[i].y, maxY) {
-                balls[i].dy *= -1
-            }
+    class func makeBallBuffer(_ device: MTLDevice) -> MTLBuffer {
+        let balls = Renderer.randomBalls()
+        return device.makeBuffer(bytes: balls, length: ballC * MemoryLayout<Ball>.stride)!
+    }
+    
+    func updateBallsLoop() {
+        let buffer = commandQueue.makeCommandBuffer()!
+        let encoder = buffer.makeComputeCommandEncoder()!
+        buffer.addCompletedHandler { _ in
+            self.updateBallsLoop()
         }
-        copyToVertexBuffer()
+
+        encoder.setComputePipelineState(moveState)
+        encoder.setBuffer(ballBuffer, offset: 0, index: 0)
+        encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadGroupSize)
+        encoder.endEncoding()
+        buffer.commit()
     }
 
     func draw(in view: MTKView) {
@@ -164,8 +154,6 @@ class Renderer: NSObject, MTKViewDelegate {
                 semaphore.signal()
             }
             
-            self.updateGameState()
-
             /// Delay getting the currentRenderPassDescriptor until we absolutely need it to avoid
             ///   holding onto the drawable and blocking the display pipeline any longer than necessary
             let renderPassDescriptor = view.currentRenderPassDescriptor
@@ -175,7 +163,7 @@ class Renderer: NSObject, MTKViewDelegate {
                 if let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) {
                     renderEncoder.setRenderPipelineState(drawState)
                     renderEncoder.setFragmentTexture(ballTexture, index: 0)
-                    renderEncoder.setVertexBuffers([vertexBuffer, colorBuffer], offsets: [0, 0], range: 0..<2)
+                    renderEncoder.setVertexBuffers([ballBuffer, colorBuffer], offsets: [0, 0], range: 0..<2)
                     renderEncoder.drawPrimitives(type: MTLPrimitiveType.point, vertexStart: 0, vertexCount: ballC)
                     renderEncoder.endEncoding()
                     
