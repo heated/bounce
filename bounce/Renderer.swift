@@ -6,18 +6,22 @@ typealias Color = SIMD4<Float>
 
 let maxX = width - ballDiam
 let maxY = height - ballDiam
-let ballSpeed: Float = 0.03
 
-let targetBallC = 100_000
+let targetBallC = Int(TARGET_BALL_C)
 let apxAreaPerBall = maxX * maxY / Float(targetBallC)
 let apxLengthPerBall = sqrt(apxAreaPerBall)
 let xBalls = Int(maxX / apxLengthPerBall)
 let yBalls = Int(maxY / apxLengthPerBall)
-let ballC = xBalls * yBalls
+let gridRows = Int(ceil(maxY / ballDiam))
+let gridCols = Int(ceil(maxX / ballDiam))
+/// A ball count that's not a multiple of 256 leads to what I assume is some balls updating multiple times per time step.
+let ballC = (xBalls * yBalls / 256) * 256
+let tileC = gridRows * gridCols
 
 let maxBuffersInFlight = 3
-let ceil = Int((ballC - 1)/256 + 1)
-let gridSize = MTLSizeMake(ceil, 1, 1)
+//let threadsPerGroup = Int((ballC - 1)/256 + 1)
+let threadsPerGroup = Int(ballC/256)
+let gridSize = MTLSizeMake(threadsPerGroup, 1, 1)
 let threadGroupSize = MTLSizeMake(256, 1, 1)
 
 struct Ball {
@@ -31,11 +35,17 @@ struct Ball {
     }
 }
 
+struct Tile {
+    let bucket: simd_float2x4
+    let bucket2: simd_float2x2
+}
+
 class Renderer: NSObject, MTKViewDelegate {
     public let device: MTLDevice
     let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
     let commandQueue: MTLCommandQueue
     let moveState: MTLComputePipelineState
+    let collideState: MTLComputePipelineState
     var drawState: MTLRenderPipelineState
     var ballBuffer: MTLBuffer
     var colorBuffer: MTLBuffer
@@ -48,6 +58,7 @@ class Renderer: NSObject, MTKViewDelegate {
         
         let library = device.makeDefaultLibrary()!
         let moveBalls = library.makeFunction(name: "moveBalls")!
+        let collideBalls = library.makeFunction(name: "collideBalls")!
         let vertexFunction = library.makeFunction(name: "vertexShader")
         let fragmentFunction = library.makeFunction(name: "fragmentShader")
         
@@ -61,15 +72,12 @@ class Renderer: NSObject, MTKViewDelegate {
         Renderer.setAlphaBlendSettings(attachment)
         
         moveState = try! device.makeComputePipelineState(function: moveBalls)
+        collideState = try! device.makeComputePipelineState(function: collideBalls)
         drawState = try! device.makeRenderPipelineState(descriptor: pipelineDescriptor)
         
-        colorBuffer = Renderer.makeColorBuffer(device)
         ballBuffer = Renderer.makeBallBuffer(device)
+        colorBuffer = Renderer.makeColorBuffer(device)
         super.init()
-        
-        for _ in 0..<40 {
-            updateBallsLoop()
-        }
     }
     
     class func loadTexture(device: MTLDevice,
@@ -101,7 +109,6 @@ class Renderer: NSObject, MTKViewDelegate {
         let areaPerBall = maxX * maxY / Float(ballC)
         let lengthPerBall = sqrt(areaPerBall)
         
-        assert(lengthPerBall > ballDiam)
         let offset = (lengthPerBall - ballDiam) / 2
         var balls: [Ball] = []
         
@@ -116,6 +123,15 @@ class Renderer: NSObject, MTKViewDelegate {
         return balls
     }
     
+    class func makeGridBuffer(_ device: MTLDevice) -> MTLBuffer {
+        return device.makeBuffer(length: tileC * MemoryLayout<Tile>.stride)!
+    }
+    
+    class func makeBallBuffer(_ device: MTLDevice) -> MTLBuffer {
+        let balls = Renderer.randomBalls()
+        return device.makeBuffer(bytes: balls, length: ballC * MemoryLayout<Ball>.stride)!
+    }
+    
     class func makeColorBuffer(_ device: MTLDevice) -> MTLBuffer {
         let colors = (0..<ballC).map { _ -> Color in
             var color = Color.random(in: 0..<1)
@@ -125,20 +141,16 @@ class Renderer: NSObject, MTKViewDelegate {
         return device.makeBuffer(bytes: colors, length: ballC * MemoryLayout<Color>.stride)!
     }
     
-    class func makeBallBuffer(_ device: MTLDevice) -> MTLBuffer {
-        let balls = Renderer.randomBalls()
-        return device.makeBuffer(bytes: balls, length: ballC * MemoryLayout<Ball>.stride)!
-    }
-    
-    func updateBallsLoop() {
+    func updateBalls() {
         let buffer = commandQueue.makeCommandBuffer()!
         let encoder = buffer.makeComputeCommandEncoder()!
-        buffer.addCompletedHandler { _ in
-            self.updateBallsLoop()
-        }
-
+        
+        let sizeBuffer = device.makeBuffer(length: tileC * MemoryLayout<uint>.stride)!
+        let gridBuffer = Renderer.makeGridBuffer(device)
         encoder.setComputePipelineState(moveState)
-        encoder.setBuffer(ballBuffer, offset: 0, index: 0)
+        encoder.setBuffers([ballBuffer, gridBuffer, sizeBuffer], offsets: [0, 0, 0], range: 0..<3)
+        encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadGroupSize)
+        encoder.setComputePipelineState(collideState)
         encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadGroupSize)
         encoder.endEncoding()
         buffer.commit()
@@ -152,6 +164,10 @@ class Renderer: NSObject, MTKViewDelegate {
             let semaphore = inFlightSemaphore
             commandBuffer.addCompletedHandler { (_ commandBuffer)-> Swift.Void in
                 semaphore.signal()
+            }
+            
+            for _ in 0..<1 {
+                updateBalls()
             }
             
             /// Delay getting the currentRenderPassDescriptor until we absolutely need it to avoid
