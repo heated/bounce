@@ -44,7 +44,7 @@ uint2 gridPos(float2 pos) {
     int2 div = int2(pos / ballDiam);
     uint2 upperBound = uint2(max(div, int2(0, 0)));
     return min(upperBound,
-               uint2(maxX, maxY));
+               uint2(gridCols - 1, gridRows - 1));
 }
 
 uint gridIdx(float2 pos) {
